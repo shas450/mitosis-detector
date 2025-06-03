@@ -1,62 +1,50 @@
 import os
 import pandas as pd
 import numpy as np
-from PIL import Image
-import pickle
+import cv2
+import tensorflow as tf
+
+model_path = r'C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\models\unet_model_RGB_4.h5'
+IMG_SIZE = 100  # Change if needed
 
 
-def predict_mitosis(dataset_path, csv_path):
-    # Paths
-    model_path = r'./siamese_model.pkl'
+def predict_and_save_masks(csv_path, dataset_path):
+    model = tf.keras.models.load_model(model_path, compile=False)
+    df = pd.read_csv(csv_path)
+    if 'N_Positive' not in df.columns:
+        df['N_Positive'] = np.nan
 
-    # Load the saved model
-    with open(model_path, 'rb') as file:
-        siamese_model = pickle.load(file)
-
-    # Load the output_data.csv
-    track_id_data = pd.read_csv(csv_path)
-
-    # Function to load and preprocess an image
-    def preprocess_image(image_path):
-        with Image.open(image_path) as img:
-            img = img.resize((100, 100))  # Resize the image to 100x100
-            img = np.array(img) / 255.0  # Normalize pixel values to [0, 1]
-            if len(img.shape) == 2:  # If grayscale, add a channel dimension
-                img = np.expand_dims(img, axis=-1)
-            return img
-
-    # Iterate through each UUID folder and predict mitosis
-    for index, row in track_id_data.iterrows():
-        uuid_folder = os.path.join(dataset_path, row['UUID'])
-
-        # Ensure both images exist (0.tif and 1.tif)
-        image_0_path = os.path.join(uuid_folder, '0.tif')
-        image_1_path = os.path.join(uuid_folder, '1.tif')
-        if not (os.path.exists(image_0_path) and os.path.exists(image_1_path)):
-            print(f"Missing images in UUID folder {uuid_folder}. Skipping...")
+    for i, row in df.iterrows():
+        uuid_path = os.path.join(dataset_path, str(row['UUID']))
+        img_path = os.path.join(uuid_path, "combined_image.png")
+        if not os.path.exists(img_path):
+            print(f"Missing: {img_path}")
             continue
 
-        try:
-            # Load and preprocess the images
-            image_0 = preprocess_image(image_0_path)
-            image_1 = preprocess_image(image_1_path)
+        img = cv2.imread(img_path)
+        if img is None:
+            continue
 
-            # Expand dimensions to match the input shape of the model
-            image_0 = np.expand_dims(image_0, axis=0)
-            image_1 = np.expand_dims(image_1, axis=0)
+        orig_size = (img.shape[1], img.shape[0])
+        img_resized = cv2.resize(img, (IMG_SIZE, IMG_SIZE)) / 255.0
 
-            # Predict using the model
-            prediction = siamese_model.predict([image_0, image_1])
-            confidence_score = prediction[0][0]  # Raw confidence score from the model
-            mitosis_prediction = int(confidence_score > 0.5)  # Binary prediction (1 or 0)
+        pred = model.predict(np.expand_dims(img_resized, axis=0), verbose=0)[0]
+        mask_pred = (pred > 0.5).astype(np.uint8) * 255
+        mask_pred = cv2.resize(mask_pred, orig_size)
 
-            # Add predictions and confidence scores to the DataFrame
-            track_id_data.at[index, 'Mitosis/Non-Mitosis'] = mitosis_prediction
-            track_id_data.at[index, 'Confidence Score'] = confidence_score
+        save_path = os.path.join(uuid_path, "pred_mask.png")
+        cv2.imwrite(save_path, mask_pred)
 
-        except Exception as e:
-            print(f"Error processing UUID folder {uuid_folder}: {e}")
+        n_positive = int(np.sum(mask_pred == 255))
+        df.at[i, 'N_Positive'] = n_positive
 
-    # Save the updated output_data.csv with new columns
-    track_id_data.to_csv(csv_path, index=False)
-    print(f"Updated output_data.csv saved to {csv_path}.")
+        if (i + 1) % 100 == 0 or (i + 1) == len(df):
+            print(f"{i + 1}/{len(df)} masks predicted and saved.")
+
+    df.to_csv(csv_path, index=False)
+    print(f"🧪 All test masks predicted and N_Positive updated in {csv_path}.")
+
+
+# Example usage:
+# predict_and_save_masks(r"C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\segmentation\s540001_cells.csv",
+#                        r"C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\segmentation\s540001")
