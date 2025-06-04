@@ -21,7 +21,7 @@ def overlay_all_predicted_masks_on_image_both_frames(
     image_path, csv_path, dataset_path,
     window_size=300, step_size=300, mask_size=100, alpha=0.3
 ):
-    # Load frames and masks (same as before)
+    # Load frames and masks
     image = np.array(Image.open(image_path).convert("RGB"))
     H, W = image.shape[:2]
     global_mask_current = np.zeros((H, W), dtype=np.uint8)
@@ -34,7 +34,7 @@ def overlay_all_predicted_masks_on_image_both_frames(
         next_image = np.zeros_like(image)
         print(f"Warning: Next frame {next_frame_path} not found.")
 
-    # Compose the mask overlays (same as before)
+    # Compose the mask overlays
     for idx, row in df.iterrows():
         uuid, x, y = row['UUID'], int(row['X']), int(row['Y'])
         uuid_folder = os.path.join(dataset_path, str(uuid))
@@ -43,6 +43,9 @@ def overlay_all_predicted_masks_on_image_both_frames(
             continue
         mask = np.array(Image.open(mask_path).convert("L"))
         mask = (mask > 127).astype(np.uint8)
+        # Only show mitosis masks with MORE than 200 positive pixels
+        if np.sum(mask) <= 20:
+            continue
         cx, cy = x, y
         half = mask_size // 2
         y1 = max(cy - half, 0)

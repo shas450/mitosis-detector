@@ -33,3 +33,4 @@ def run_cellpose_analysis(input_path):
     df.to_csv(output_csv_path, index=False)
     print(f"Results saved to {output_csv_path}")
     return output_csv_path
+

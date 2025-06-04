@@ -1,12 +1,13 @@
-import os
 import re
 import time
-import uuid
-import numpy as np
-import pandas as pd
-from PIL import Image
 from scipy.ndimage import label, center_of_mass
 import tensorflow as tf
+import numpy as np
+import pandas as pd
+from cellpose import models, io
+import os
+from PIL import Image
+import uuid
 
 
 def infer_next_frame_path(frame0_path):
@@ -157,3 +158,49 @@ def segment_and_crop(input_path):
     return output_csv_path, output_dir
 
 
+
+def segment_and_crop_cellpose(input_path, crop_size=100, output_base='./output'):
+    """Run Cellpose, extract and crop cells, just like custom model."""
+    model = models.Cellpose(model_type='cyto3')
+    images = io.imread(input_path)
+    masks, flows, styles, diams = model.eval(images, diameter=None, flow_threshold=0.4, cellprob_threshold=0.0)
+
+    # Find frame1 for combined patch
+    base, ext = os.path.splitext(input_path)
+    match = re.search(r'(\d+)', base)
+    if not match:
+        raise ValueError("No number found in filename")
+    frame_num = int(match.group(1))
+    next_frame_path = base.replace(str(frame_num).zfill(len(match.group(1))), str(frame_num+1).zfill(len(match.group(1)))) + ext
+    if not os.path.exists(next_frame_path):
+        raise FileNotFoundError(f"Next frame {next_frame_path} does not exist.")
+    frame0 = np.array(Image.open(input_path).convert('L'))
+    frame1 = np.array(Image.open(next_frame_path).convert('L'))
+
+    unique_cells = np.unique(masks)
+    unique_cells = unique_cells[unique_cells > 0]
+    csv_records = []
+    file_name = os.path.basename(input_path).split('.')[0]
+    output_dir = os.path.join(output_base, file_name)
+    os.makedirs(output_dir, exist_ok=True)
+
+    for cell_id in unique_cells:
+        y, x = np.where(masks == cell_id)
+        centroid_x = int(np.mean(x))
+        centroid_y = int(np.mean(y))
+        patch0 = extract_patch(frame0, centroid_y, centroid_x, crop_size)
+        patch1 = extract_patch(frame1, centroid_y, centroid_x, crop_size)
+        cell_uuid = str(uuid.uuid4())
+        cell_dir = os.path.join(output_dir, cell_uuid)
+        save_cell_patches_and_combined(patch0, patch1, cell_dir)
+        csv_records.append({
+            "UUID": cell_uuid,
+            "X": centroid_x,
+            "Y": centroid_y,
+            "frame": file_name
+        })
+
+    output_csv_path = os.path.join(output_base, f"{file_name}_cells.csv")
+    pd.DataFrame(csv_records).to_csv(output_csv_path, index=False)
+    print(f"Cellpose results saved to {output_csv_path}")
+    return output_csv_path, output_dir
