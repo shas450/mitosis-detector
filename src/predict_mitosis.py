@@ -4,12 +4,25 @@ import numpy as np
 import cv2
 import tensorflow as tf
 
-model_path = r'C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\models\unet_model_RGB_4.h5'
+from config import predict_model_path
+
 IMG_SIZE = 100  # Change if needed
 
 
-def predict_and_save_masks(csv_path, dataset_path):
-    model = tf.keras.models.load_model(model_path, compile=False)
+def load_prediction_model():
+    try:
+        model = tf.keras.models.load_model(predict_model_path, compile=False)
+    except (OSError, IOError) as e:
+        print(f"❌ Failed to load model from {predict_model_path}: {e}")
+        return
+    except Exception as e:
+        print(f"❌ Unexpected error while loading model: {e}")
+    return model
+
+
+def predict_and_save_masks(csv_path, dataset_path, progress_var=None, root=None):
+    model = load_prediction_model()
+
     df = pd.read_csv(csv_path)
     if 'N_Positive' not in df.columns:
         df['N_Positive'] = np.nan
@@ -38,12 +51,15 @@ def predict_and_save_masks(csv_path, dataset_path):
         n_positive = int(np.sum(mask_pred == 255))
         df.at[i, 'N_Positive'] = n_positive
 
-        if (i + 1) % 100 == 0 or (i + 1) == len(df):
-            print(f"{i + 1}/{len(df)} masks predicted and saved.")
+        # Update progress
+        if progress_var is not None:
+            progress = int(((i + 1) / len(df)) * 100)
+            progress_var.set(progress)
+            if root:
+                root.update()
 
     df.to_csv(csv_path, index=False)
     print(f"🧪 All test masks predicted and N_Positive updated in {csv_path}.")
-
 
 # Example usage:
 # predict_and_save_masks(r"C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\segmentation\s540001_cells.csv",

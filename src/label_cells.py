@@ -5,24 +5,32 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Button
 
-image_size = 100  # Change this if your patch size is different!
+from config import PIXEL_THRESHOLD, segmentation_folder
 
-def label_mitosis(csv_path, dataset_path):
-    # Load only mitosis candidates
+image_size = 100
+
+
+def label_mitosis(csv_path):
     data = pd.read_csv(csv_path)
-    data = data[data["N_Positive"] > 0].reset_index(drop=True)
+    data = data[data["N_Positive"] > PIXEL_THRESHOLD].reset_index(drop=True)
 
-    # Skip cells with small masks
+    if 'user_label' in data.columns:
+        data = data[data['user_label'].isna() | (data['user_label'] == '')]
+
     keep_indices = []
+
     for idx, row in data.iterrows():
-        uuid_folder = row['UUID']
-        mask_path = os.path.join(dataset_path, str(uuid_folder), 'pred_mask.png')
+        frame = row['frame']
+        uuid = row['UUID']
+
+        mask_path = os.path.join(segmentation_folder, frame, uuid, 'pred_mask.png')
+
         if os.path.exists(mask_path):
             mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
             if mask is not None and np.sum(mask > 0) >= 20:
                 keep_indices.append(idx)
         else:
-            print(f"Warning: {mask_path} does not exist. Skipping.")
+            print(f"⚠️ Warning: {mask_path} does not exist. Skipping.")
 
     data = data.loc[keep_indices].reset_index(drop=True)
 
@@ -42,7 +50,8 @@ def label_mitosis(csv_path, dataset_path):
     def update_display(index):
         row = data.iloc[index]
         uuid_folder = row['UUID']
-        folder_path = os.path.join(dataset_path, str(uuid_folder))
+        mask_path = os.path.join(segmentation_folder, row['frame'], uuid_folder, 'pred_mask.png')
+        folder_path = os.path.dirname(mask_path)
         images = []
 
         for i in range(2):
@@ -53,7 +62,7 @@ def label_mitosis(csv_path, dataset_path):
                 image = 128 * np.ones((image_size, image_size, 3), dtype=np.uint8)
             else:
                 # Draw a green circle at the center
-                cv2.circle(image, (image_size // 2, image_size // 2), 10, (0, 255, 0), 1)
+                cv2.circle(image, (image_size // 2, image_size // 2), 1, (0, 255, 0), 1)
                 image = cv2.resize(image, (image_size, image_size))
                 cv2.putText(image, f"Frame {i}", (10, 30),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
@@ -62,7 +71,7 @@ def label_mitosis(csv_path, dataset_path):
         concatenated = cv2.hconcat(images)
         concatenated_rgb = cv2.cvtColor(concatenated, cv2.COLOR_BGR2RGB)
         image_display.set_data(concatenated_rgb)
-        ax.set_title(f"UUID: {uuid_folder} | Cell {index+1} of {len(data)}")
+        ax.set_title(f"UUID: {uuid_folder} | Cell {index + 1} of {len(data)}")
         fig.canvas.draw_idle()
 
     def label_and_advance(label_value):

@@ -1,4 +1,4 @@
-from show_ui import show_ui
+from show_ui import build_ui
 
 if __name__ == '__main__':
-    show_ui()
+    build_ui()
