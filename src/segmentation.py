@@ -4,10 +4,15 @@ from scipy.ndimage import label, center_of_mass
 import tensorflow as tf
 import numpy as np
 import pandas as pd
-from cellpose import models, io
 import os
 from PIL import Image
 import uuid
+from config import model_path, segmentation_folder  
+from config import segmentation_folder
+from cellpose import models, io
+
+patch_size = 256
+crop_size = 100
 
 
 def infer_next_frame_path(frame0_path):
@@ -124,12 +129,6 @@ def crop_and_save_cells(frame0, frame1, centers, output_dir, frame_name, crop_si
     return csv_records
 
 
-model_path = r"C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\models\unet_cell_patches.keras"
-segmentation_folder = r"C:\Users\sharo\Desktop\Odd_test\Mitosis_Detector\frames\segmentation"
-crop_size = 100
-patch_size = 256
-
-
 def segment_and_crop(input_path):
     file_name = os.path.splitext(os.path.basename(input_path))[0]
     output_dir = os.path.join(segmentation_folder, file_name)
@@ -139,18 +138,11 @@ def segment_and_crop(input_path):
     frame0 = np.array(Image.open(input_path).convert('L'))
     frame1 = np.array(Image.open(frame1_path).convert('L'))
 
-    # Load model (assumes global model_path, or pass as arg)
     model = tf.keras.models.load_model(model_path, compile=False)
-
-    # Predict mask and find centers
     mask = predict_mask(model, frame0, patch_size=patch_size)
     centers = find_cell_centers(mask)
     print(f"Detected {len(centers)} cells.")
-
-    # Crop, save, and record info
     csv_records = crop_and_save_cells(frame0, frame1, centers, output_dir, file_name, crop_size)
-
-    # Save CSV
     output_csv_path = os.path.join(segmentation_folder, f"{file_name}_cells.csv")
     pd.DataFrame(csv_records).to_csv(output_csv_path, index=False)
     time.sleep(1)
@@ -159,48 +151,85 @@ def segment_and_crop(input_path):
 
 
 
-def segment_and_crop_cellpose(input_path, crop_size=100, output_base='./output'):
-    """Run Cellpose, extract and crop cells, just like custom model."""
-    model = models.Cellpose(model_type='cyto3')
-    images = io.imread(input_path)
-    masks, flows, styles, diams = model.eval(images, diameter=None, flow_threshold=0.4, cellprob_threshold=0.0)
+def create_cellpose_model():
+    try:
+        model = models.Cellpose(model_type='cyto3')
+        return model
+    except Exception as e:
+        print("❌ Error creating Cellpose model:", e)
+        raise
 
-    # Find frame1 for combined patch
-    base, ext = os.path.splitext(input_path)
+def load_image_grayscale(path):
+    return np.array(Image.open(path).convert('L'))
+
+def find_next_frame_path(current_path):
+    base, ext = os.path.splitext(current_path)
     match = re.search(r'(\d+)', base)
     if not match:
         raise ValueError("No number found in filename")
-    frame_num = int(match.group(1))
-    next_frame_path = base.replace(str(frame_num).zfill(len(match.group(1))), str(frame_num+1).zfill(len(match.group(1)))) + ext
+    frame_num_str = match.group(1)
+    frame_num = int(frame_num_str)
+    next_frame_num_str = str(frame_num + 1).zfill(len(frame_num_str))
+    next_frame_path = base.replace(frame_num_str, next_frame_num_str) + ext
     if not os.path.exists(next_frame_path):
         raise FileNotFoundError(f"Next frame {next_frame_path} does not exist.")
-    frame0 = np.array(Image.open(input_path).convert('L'))
-    frame1 = np.array(Image.open(next_frame_path).convert('L'))
+    return next_frame_path
 
+def extract_cells_and_save_patches(masks, frame0, frame1, output_dir, progress_var=None, root=None):
     unique_cells = np.unique(masks)
-    unique_cells = unique_cells[unique_cells > 0]
+    unique_cells = unique_cells[unique_cells > 0]  # Exclude background (0)
+    total_cells = len(unique_cells)
     csv_records = []
-    file_name = os.path.basename(input_path).split('.')[0]
-    output_dir = os.path.join(output_base, file_name)
+
     os.makedirs(output_dir, exist_ok=True)
 
-    for cell_id in unique_cells:
+    for i, cell_id in enumerate(unique_cells):
         y, x = np.where(masks == cell_id)
         centroid_x = int(np.mean(x))
         centroid_y = int(np.mean(y))
+
         patch0 = extract_patch(frame0, centroid_y, centroid_x, crop_size)
         patch1 = extract_patch(frame1, centroid_y, centroid_x, crop_size)
+
         cell_uuid = str(uuid.uuid4())
         cell_dir = os.path.join(output_dir, cell_uuid)
         save_cell_patches_and_combined(patch0, patch1, cell_dir)
+
         csv_records.append({
             "UUID": cell_uuid,
             "X": centroid_x,
             "Y": centroid_y,
-            "frame": file_name
+            "frame": os.path.basename(output_dir)
         })
 
-    output_csv_path = os.path.join(output_base, f"{file_name}_cells.csv")
+        # 🟢 Update the progress bar per patch
+        if progress_var is not None:
+            progress_var.set((i + 1) / total_cells * 100)
+            if root:
+                root.update_idletasks()
+
+    return csv_records
+
+def segment_and_crop_cellpose(input_path, progress_var=None, root=None):
+    model = create_cellpose_model()
+    images = io.imread(input_path)
+    masks, _, _, _ = model.eval(images, diameter=None, flow_threshold=0.4, cellprob_threshold=0.0)
+
+    frame0 = load_image_grayscale(input_path)
+    next_frame_path = find_next_frame_path(input_path)
+    frame1 = load_image_grayscale(next_frame_path)
+
+    file_name = os.path.basename(input_path).split('.')[0]
+    output_dir = os.path.join(segmentation_folder, file_name)
+
+    csv_records = extract_cells_and_save_patches(
+        masks, frame0, frame1, output_dir,
+        progress_var=progress_var,
+        root=root
+    )
+
+    output_csv_path = os.path.join(segmentation_folder, f"{file_name}_cells.csv")
     pd.DataFrame(csv_records).to_csv(output_csv_path, index=False)
+
     print(f"Cellpose results saved to {output_csv_path}")
     return output_csv_path, output_dir

@@ -14,21 +14,6 @@ MitosisDetector is a Python application for automated detection, segmentation, a
 
 ## Project Structure
 
-```
-config.py
-main.py
-requirements.txt
-show_ui.py
-src/
-    segmentation.py
-    predict_mitosis.py
-    show_pred.py
-    label_cells.py
-frames/
-models/
-segmentation/
-train/
-```
 
 - **config.py:** Centralized configuration for paths and constants.
 - **main.py:** Entry point for launching the GUI.
@@ -43,14 +28,14 @@ train/
 
 1. **Clone the repository:**
    ```sh
-   git clone https://github.com/yourusername/MitosisDetector.git
+   git clone https://github.com/shas450/MitosisDetector.git
    cd MitosisDetector
    ```
 
-2. **Set up a Python environment:**
+2. **Set up a Python environment (Windows):**
    ```sh
    python -m venv env
-   env\Scripts\activate  # On Windows
+   env\Scripts\activate
    ```
 
 3. **Install dependencies:**
@@ -58,21 +43,11 @@ train/
    pip install -r requirements.txt
    ```
 
-4. **Download or place your trained models in the [`models`](models) directory.**
-   - `unet_cell_patches.keras` for segmentation
-   - `unet_model_RGB_S.h5` for mitosis prediction
-
-5. **Prepare your input images in the [`frames`](frames) directory or select them via the GUI.**
-
 ## Usage
 
 1. **Launch the application:**
    ```sh
    python main.py
-   ```
-   or
-   ```sh
-   python show_ui.py
    ```
 
 2. **In the GUI:**
@@ -81,6 +56,35 @@ train/
    - Click "Run" to start processing.
    - Review segmentation and mitosis predictions interactively.
    - Label mitosis candidates as needed.
+
+3. **Training New Models:**
+   After labeling your data, you can train new models:
+   
+   a) **Prepare the training dataset:**
+   ```sh
+   cd train
+   python prepare_dataset.py
+   ```
+   
+   b) **Train the U-Net model:**
+   ```sh
+   python U_net_model_RGB.py
+   ```
+   
+   This will create a new trained model in the `train/` folder with a timestamp.
+
+## Training Workflow
+
+The application supports continuous improvement through retraining:
+
+1. **Label Data:** Use the GUI to label mitosis candidates in your images
+2. **Export Labels:** Labels are saved in `segmentation/united.csv`
+3. **Prepare Dataset:** Run `train/prepare_dataset.py` to copy data to training folder
+4. **Train Model:** Run `train/U_net_model_RGB.py` to train a new model
+5. **Update Config:** Update `config.py` to point to your new model for inference
+
+See [`train/README.md`](train/README.md) for detailed training instructions.
+
 
 ## Configuration
 
@@ -94,5 +98,6 @@ Edit [`config.py`](config.py) to adjust paths and parameters as needed for your 
 ## Notes
 
 - The application expects images to be named with frame numbers (e.g., `s550000.tif`, `s550001.tif`, ...).
+- **id you analaze frame 00XX  make sure that farme 00X X+1 in the same folder!** 
 - Output CSVs and segmentation results are saved in the [`segmentation`](segmentation) directory.
 - For best results, ensure your models are compatible with the expected input size and format.

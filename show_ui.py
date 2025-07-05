@@ -157,4 +157,3 @@ def build_ui():
     run_button.pack(pady=10)
 
     root.mainloop()
-
