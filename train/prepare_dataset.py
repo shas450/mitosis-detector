@@ -40,38 +40,75 @@ def copy_csv_file():
         return False
     
     try:
-        # Read the original CSV
-        df = pd.read_csv(united_csv_path)
-        print(f"📊 Original CSV contains {len(df)} samples")
+        # Read the original CSV from segmentation
+        new_df = pd.read_csv(united_csv_path)
+        print(f"📊 Source CSV contains {len(new_df)} samples")
         
         # Check if it has the expected columns
         required_columns = ['UUID', 'user_label']
-        missing_columns = [col for col in required_columns if col not in df.columns]
+        missing_columns = [col for col in required_columns if col not in new_df.columns]
         if missing_columns:
             print(f"❌ ERROR: CSV file missing required columns: {missing_columns}")
-            print(f"Available columns: {list(df.columns)}")
+            print(f"Available columns: {list(new_df.columns)}")
             return False
         
         # Convert user_label to binary format for training
         # Assuming user_label contains 1 for mitosis, 0 for non-mitosis, or empty for unlabeled
-        df['Mitosis/Non-Mitosis'] = df['user_label'].fillna(0).astype(int)
+        new_df['Mitosis/Non-Mitosis'] = new_df['user_label'].fillna(0).astype(int)
         
         # Filter out unlabeled samples (where user_label is empty/NaN)
-        labeled_df = df[df['user_label'].notna() & (df['user_label'] != '')]
+        new_labeled_df = new_df[new_df['user_label'].notna() & (new_df['user_label'] != '')]
         
-        if len(labeled_df) == 0:
-            print("❌ ERROR: No labeled samples found in CSV file")
+        if len(new_labeled_df) == 0:
+            print("❌ ERROR: No labeled samples found in source CSV file")
             print("Please label some samples using the GUI first")
             return False
         
-        # Save the processed CSV for training
-        labeled_df.to_csv(train_csv_path, index=False)
-        print(f"✅ Training CSV created with {len(labeled_df)} labeled samples")
+        # Check if training CSV already exists
+        if os.path.exists(train_csv_path):
+            print(f"📋 Existing training CSV found. Merging with new data...")
+            
+            # Read existing training CSV
+            existing_df = pd.read_csv(train_csv_path)
+            print(f"📊 Existing training CSV contains {len(existing_df)} samples")
+            
+            # Ensure existing CSV has the required columns
+            if 'Mitosis/Non-Mitosis' not in existing_df.columns:
+                # If old format, try to convert
+                if 'user_label' in existing_df.columns:
+                    existing_df['Mitosis/Non-Mitosis'] = existing_df['user_label'].fillna(0).astype(int)
+                else:
+                    print("❌ ERROR: Existing training CSV has incompatible format")
+                    return False
+            
+            # Merge dataframes, with new data taking precedence for duplicates
+            # First, get UUIDs that exist in both datasets
+            overlapping_uuids = set(existing_df['UUID']) & set(new_labeled_df['UUID'])
+            if overlapping_uuids:
+                print(f"🔄 Updating {len(overlapping_uuids)} existing samples with new labels")
+                # Remove overlapping UUIDs from existing data
+                existing_df = existing_df[~existing_df['UUID'].isin(overlapping_uuids)]
+            
+            # Combine the datasets
+            combined_df = pd.concat([existing_df, new_labeled_df], ignore_index=True)
+            
+            # Remove any potential duplicates (just in case)
+            combined_df = combined_df.drop_duplicates(subset=['UUID'], keep='last')
+            
+            print(f"✅ Merged training CSV: {len(existing_df)} existing + {len(new_labeled_df)} new = {len(combined_df)} total samples")
+            
+        else:
+            print("📋 No existing training CSV found. Creating new one...")
+            combined_df = new_labeled_df
+            print(f"✅ Training CSV created with {len(combined_df)} labeled samples")
+        
+        # Save the combined CSV for training
+        combined_df.to_csv(train_csv_path, index=False)
         
         # Show label distribution
-        mitosis_count = len(labeled_df[labeled_df['Mitosis/Non-Mitosis'] == 1])
-        non_mitosis_count = len(labeled_df[labeled_df['Mitosis/Non-Mitosis'] == 0])
-        print(f"📈 Label distribution: {mitosis_count} mitosis, {non_mitosis_count} non-mitosis")
+        mitosis_count = len(combined_df[combined_df['Mitosis/Non-Mitosis'] == 1])
+        non_mitosis_count = len(combined_df[combined_df['Mitosis/Non-Mitosis'] == 0])
+        print(f"📈 Final label distribution: {mitosis_count} mitosis, {non_mitosis_count} non-mitosis")
         
         return True
     except Exception as e:
